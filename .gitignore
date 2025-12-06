@@ -1,0 +1,19 @@
+# ROS2 build / install / log
+build/
+install/
+log/
+.colcon/
+
+# Python cache
+**/__pycache__/
+*.pyc
+
+# VSCode
+.vscode/
+
+# 大数据 / 地图 / rosbag 等，不上传到 GitHub
+ucsd_robocar_nav2_pkg/ros_data/
+*.pgm
+*.db3
+*.bag
+core
