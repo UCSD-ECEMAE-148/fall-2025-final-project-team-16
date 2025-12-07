@@ -33,7 +33,8 @@ setup(
             'lqg_node = ucsd_robocar_control2_pkg.lqg_node:main',
             'lqg_w_node = ucsd_robocar_control2_pkg.lqg_w_node:main',
             'mpc_node = ucsd_robocar_control2_pkg.mpc_node:main',
-            'pid_node = ucsd_robocar_control2_pkg.pid_node:main'
+            'pid_node = ucsd_robocar_control2_pkg.pid_node:main',
+            'intersection_ocr_node = ucsd_robocar_control2_pkg.intersection_ocr_node:main'
         ],
     },
 )
