@@ -12,15 +12,21 @@ def generate_launch_description():
     Launch file for the complete lane following + intersection OCR system.
     
     This launches:
-    1. Lane detection node
-    2. OCR client node
-    3. Intersection OCR decision node
+    1. Camera node (OAK-D, Intel RealSense, or Webcam)
+    2. Lane detection node
+    3. OCR client node
+    4. Intersection OCR decision node
     """
     
     # Package names
     control_package = 'ucsd_robocar_control2_pkg'
     lane_detection_package = 'ucsd_robocar_lane_detection2_pkg'
     ocr_package = 'ocr_remote_client'
+    sensor_package = 'ucsd_robocar_sensor2_pkg'
+    
+    # Camera type selection (default: oakd)
+    # Options: 'oakd', 'intel', 'webcam'
+    camera_type = LaunchConfiguration('camera_type', default='oakd')
     
     # Config files
     intersection_config = os.path.join(
@@ -36,6 +42,47 @@ def generate_launch_description():
     )
     
     ld = LaunchDescription()
+    
+    # Camera node - launch based on camera type
+    # Default: oakd (based on your car_config.yaml)
+    camera_type_str = os.environ.get('CAMERA_TYPE', 'oakd')
+    
+    if camera_type_str == 'oakd':
+        # OAK-D camera - remap topic from camera/color/image_raw_0 to /camera/color/image_raw
+        oakd_node = Node(
+            package='multi_cam',
+            executable='oakd_publisher',
+            output='screen',
+            remappings=[
+                ('camera/color/image_raw_0', '/camera/color/image_raw')
+            ],
+            name='oakd_camera_node'
+        )
+        ld.add_action(oakd_node)
+    elif camera_type_str == 'intel':
+        # Intel RealSense camera
+        camera_launch_file = os.path.join(
+            get_package_share_directory(sensor_package),
+            'launch',
+            'camera_intel.launch.py'
+        )
+        if os.path.exists(camera_launch_file):
+            camera_launch = IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(camera_launch_file)
+            )
+            ld.add_action(camera_launch)
+    elif camera_type_str == 'webcam':
+        # Webcam
+        camera_launch_file = os.path.join(
+            get_package_share_directory(sensor_package),
+            'launch',
+            'camera_webcam.launch.py'
+        )
+        if os.path.exists(camera_launch_file):
+            camera_launch = IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(camera_launch_file)
+            )
+            ld.add_action(camera_launch)
     
     # Lane detection node
     lane_detection_node = Node(

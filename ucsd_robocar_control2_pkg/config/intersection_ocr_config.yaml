@@ -5,13 +5,14 @@ intersection_ocr_node:
     
     # Blue tape detection parameters (HSV color space)
     blue_tape_detection_enabled: true
-    blue_hue_low: 100        # HSV lower bound for blue color (Hue: 0-179)
-    blue_hue_high: 130       # HSV upper bound for blue color
-    blue_saturation_low: 50  # Saturation lower bound (0-255)
+    blue_hue_low: 105        # HSV lower bound for blue color (Hue: 0-179) - tightened from 100
+    blue_hue_high: 125       # HSV upper bound for blue color - tightened from 130
+    blue_saturation_low: 80  # Saturation lower bound (0-255) - increased from 50 to exclude light blue
     blue_saturation_high: 255
-    blue_value_low: 50       # Value (brightness) lower bound (0-255)
+    blue_value_low: 60       # Value (brightness) lower bound (0-255) - increased from 50
     blue_value_high: 255
-    blue_detection_threshold: 0.05  # minimum fraction of image that must be blue (0.0-1.0)
+    blue_detection_threshold: 0.12  # minimum fraction of image that must be blue (0.0-1.0) - increased from 0.05 to 0.12 (12%)
+    blue_detection_debounce_count: 8  # number of consecutive detections needed to confirm - increased from 5 to 8
     
     # Intersection behavior
     stop_duration: 1.0  # seconds to wait after stopping before OCR processing

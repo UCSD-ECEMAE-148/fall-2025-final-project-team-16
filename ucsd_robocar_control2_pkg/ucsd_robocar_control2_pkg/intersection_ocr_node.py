@@ -95,6 +95,7 @@ class IntersectionOcrNode(Node):
                 ('blue_value_low', 50),
                 ('blue_value_high', 255),
                 ('blue_detection_threshold', 0.05),  # minimum fraction of image that must be blue
+                ('blue_detection_debounce_count', 5),  # number of consecutive detections needed to confirm
                 ('intersection_distance_threshold', 2.0),  # meters (if using odometry)
                 ('stop_duration', 1.0),  # seconds to wait after stopping
                 ('ocr_confidence_threshold', 0.5),
@@ -119,6 +120,7 @@ class IntersectionOcrNode(Node):
         self.blue_value_low = self.get_parameter('blue_value_low').get_parameter_value().integer_value
         self.blue_value_high = self.get_parameter('blue_value_high').get_parameter_value().integer_value
         self.blue_detection_threshold = self.get_parameter('blue_detection_threshold').get_parameter_value().double_value
+        self.blue_detection_debounce_count = self.get_parameter('blue_detection_debounce_count').get_parameter_value().integer_value
         self.stop_duration = self.get_parameter('stop_duration').get_parameter_value().double_value
         self.turn_angle_left = self.get_parameter('turn_angle_left').get_parameter_value().double_value
         self.turn_angle_right = self.get_parameter('turn_angle_right').get_parameter_value().double_value
@@ -138,6 +140,10 @@ class IntersectionOcrNode(Node):
         self.turn_lane_detected = False  # Track if lane is detected during turn
         self.turn_lane_detection_start_time = None
         self.stop_command_start_time = None
+        
+        # Blue tape detection debouncing (avoid false positives)
+        self.blue_tape_detection_count = 0  # Count consecutive detections
+        self.blue_tape_detection_threshold_count = 5  # Need N consecutive detections to confirm
         
         # Centroid tracking for lane following
         self.latest_centroid_error = 0.0
@@ -177,9 +183,10 @@ class IntersectionOcrNode(Node):
     def detect_blue_tape(self, image):
         """
         Detect blue tape in the image using HSV color space filtering.
-        Returns True if blue tape is detected.
+        Returns True if blue tape is detected (with debouncing to avoid false positives).
         """
         if image is None:
+            self.blue_tape_detection_count = 0  # Reset count if no image
             return False
         
         # Convert BGR to HSV color space
@@ -201,10 +208,22 @@ class IntersectionOcrNode(Node):
         blue_pixels = np.count_nonzero(roi_bottom)
         blue_ratio = blue_pixels / total_pixels if total_pixels > 0 else 0.0
         
-        # If blue ratio exceeds threshold, blue tape is detected
+        # Debouncing: require consecutive detections to avoid false positives
         if blue_ratio >= self.blue_detection_threshold:
-            self.get_logger().info(f'Blue tape detected! Blue ratio: {blue_ratio:.3f} (threshold: {self.blue_detection_threshold})')
-            return True
+            self.blue_tape_detection_count += 1
+            # Only log every 10th detection to avoid spam
+            if self.blue_tape_detection_count % 10 == 0:
+                self.get_logger().debug(f'Blue detected: ratio={blue_ratio:.3f}, count={self.blue_tape_detection_count}/{self.blue_detection_debounce_count}')
+            
+            # Confirm detection only after N consecutive detections
+            if self.blue_tape_detection_count >= self.blue_detection_debounce_count:
+                self.get_logger().info(f'Blue tape confirmed! Blue ratio: {blue_ratio:.3f} (threshold: {self.blue_detection_threshold}, confirmed after {self.blue_detection_debounce_count} detections)')
+                return True
+        else:
+            # Reset count if detection fails
+            if self.blue_tape_detection_count > 0:
+                self.get_logger().debug(f'Blue detection reset. Last ratio: {blue_ratio:.3f}')
+            self.blue_tape_detection_count = 0
         
         return False
     
