@@ -38,4 +38,10 @@ intersection_ocr_node:
     
     # Stop command parameters
     stop_command_duration: 2.0  # seconds to wait before shutdown after stop command is received
+    
+    # VESC connection checking
+    vesc_check_enabled: true  # Enable VESC connection monitoring
+    vesc_device_path: "/dev/ttyACM0"  # VESC device file path
+    vesc_check_interval: 2.0  # seconds between VESC connection checks
+    vesc_node_name: "vesc_twist_node"  # Name of VESC node to check
 

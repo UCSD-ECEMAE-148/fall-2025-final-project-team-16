@@ -22,6 +22,9 @@ import cv2
 import numpy as np
 import re
 import time
+import os
+import subprocess
+import sys
 
 NODE_NAME = 'intersection_ocr_node'
 CAMERA_TOPIC_NAME = '/camera/color/image_raw'
@@ -110,6 +113,10 @@ class IntersectionOcrNode(Node):
                 ('turn_lane_error_threshold', 0.15),  # Centroid error threshold to consider lane found
                 ('turn_blend_ratio', 0.6),  # Ratio of turn_duration for fixed angle phase (0.6 = 60%)
                 ('stop_command_duration', 2.0),  # Seconds to wait before shutdown after stop command
+                ('vesc_check_enabled', True),  # Enable VESC connection checking
+                ('vesc_device_path', '/dev/ttyACM0'),  # VESC device file path
+                ('vesc_check_interval', 2.0),  # Seconds between VESC connection checks
+                ('vesc_node_name', 'vesc_twist_node'),  # Name of VESC node to check
             ]
         )
         
@@ -134,6 +141,13 @@ class IntersectionOcrNode(Node):
         self.turn_blend_ratio = self.get_parameter('turn_blend_ratio').get_parameter_value().double_value
         self.stop_command_duration = self.get_parameter('stop_command_duration').get_parameter_value().double_value
         
+        # VESC connection checking
+        self.vesc_check_enabled = self.get_parameter('vesc_check_enabled').get_parameter_value().bool_value
+        self.vesc_device_path = self.get_parameter('vesc_device_path').get_parameter_value().string_value
+        self.vesc_check_interval = self.get_parameter('vesc_check_interval').get_parameter_value().double_value
+        self.vesc_node_name = self.get_parameter('vesc_node_name').get_parameter_value().string_value
+        self.vesc_connection_failed = False
+        
         # State tracking
         self.stop_start_time = None
         self.turn_start_time = None
@@ -153,6 +167,15 @@ class IntersectionOcrNode(Node):
         # Control timer
         self.control_timer = self.create_timer(0.05, self.control_loop)  # 20 Hz
         
+        # VESC connection check timer (if enabled)
+        if self.vesc_check_enabled:
+            self.vesc_check_timer = self.create_timer(self.vesc_check_interval, self.check_vesc_connection)
+            # Perform initial VESC check
+            if not self.check_vesc_connection_initial():
+                self.get_logger().error('VESC connection check failed at startup. Terminating program...')
+                self.vesc_connection_failed = True
+                self.shutdown_due_to_vesc_failure()
+        
         # Debug counters
         self._cmd_log_counter = 0
         self._centroid_log_counter = 0
@@ -162,7 +185,8 @@ class IntersectionOcrNode(Node):
             f'Intersection OCR Node initialized.\n'
             f'State: {self.current_state}\n'
             f'Using Ackermann: {self.use_ackermann}\n'
-            f'Blue tape detection: {self.blue_tape_detection_enabled}'
+            f'Blue tape detection: {self.blue_tape_detection_enabled}\n'
+            f'VESC check enabled: {self.vesc_check_enabled}'
         )
     
     def camera_callback(self, msg: Image):
@@ -261,6 +285,135 @@ class IntersectionOcrNode(Node):
             return False
         
         return self.detect_blue_tape(self.latest_image)
+    
+    def check_vesc_device(self):
+        """
+        Check if VESC device file exists.
+        Returns True if device file exists, False otherwise.
+        """
+        return os.path.exists(self.vesc_device_path)
+    
+    def check_vesc_node(self):
+        """
+        Check if vesc_twist_node is running.
+        Returns True if node is running, False otherwise.
+        """
+        try:
+            # Use ros2 node list to check if vesc_twist_node is running
+            result = subprocess.run(
+                ['ros2', 'node', 'list'],
+                capture_output=True,
+                text=True,
+                timeout=2.0
+            )
+            if result.returncode == 0:
+                node_list = result.stdout
+                return self.vesc_node_name in node_list
+            else:
+                self.get_logger().warn(f'Failed to get node list: {result.stderr}')
+                return False
+        except subprocess.TimeoutExpired:
+            self.get_logger().warn('Timeout while checking VESC node status')
+            return False
+        except Exception as e:
+            self.get_logger().warn(f'Error checking VESC node: {e}')
+            return False
+    
+    def check_vesc_connection_initial(self):
+        """
+        Initial VESC connection check at startup.
+        Returns True if VESC is connected, False otherwise.
+        """
+        if not self.vesc_check_enabled:
+            return True  # Skip check if disabled
+        
+        self.get_logger().info('Performing initial VESC connection check...')
+        
+        # Check device file
+        device_ok = self.check_vesc_device()
+        if not device_ok:
+            self.get_logger().error(f'VESC device file not found: {self.vesc_device_path}')
+            self.get_logger().error('Please check:')
+            self.get_logger().error('  1. VESC is powered on')
+            self.get_logger().error('  2. USB cable is connected')
+            self.get_logger().error('  3. Device permissions are correct (may need to add user to dialout group)')
+            return False
+        
+        self.get_logger().info(f'VESC device file found: {self.vesc_device_path}')
+        
+        # Wait a bit for node to start (if it hasn't started yet)
+        time.sleep(1.0)
+        
+        # Check if node is running
+        node_ok = self.check_vesc_node()
+        if not node_ok:
+            self.get_logger().error(f'VESC node "{self.vesc_node_name}" is not running')
+            self.get_logger().error('Please ensure vesc_twist_node is launched')
+            return False
+        
+        self.get_logger().info(f'VESC node "{self.vesc_node_name}" is running')
+        self.get_logger().info('VESC connection check passed')
+        return True
+    
+    def check_vesc_connection(self):
+        """
+        Periodic VESC connection check.
+        If VESC connection fails, terminates the program.
+        """
+        if not self.vesc_check_enabled:
+            return
+        
+        if self.vesc_connection_failed:
+            return  # Already failed, don't check again
+        
+        # Check device file
+        device_ok = self.check_vesc_device()
+        if not device_ok:
+            self.get_logger().error(f'VESC device file lost: {self.vesc_device_path}')
+            self.vesc_connection_failed = True
+            self.shutdown_due_to_vesc_failure()
+            return
+        
+        # Check if node is running
+        node_ok = self.check_vesc_node()
+        if not node_ok:
+            self.get_logger().error(f'VESC node "{self.vesc_node_name}" stopped running')
+            self.vesc_connection_failed = True
+            self.shutdown_due_to_vesc_failure()
+            return
+    
+    def shutdown_due_to_vesc_failure(self):
+        """
+        Shutdown the program due to VESC connection failure.
+        Sets flag to trigger shutdown in main loop.
+        """
+        self.get_logger().error('=' * 60)
+        self.get_logger().error('VESC CONNECTION FAILURE DETECTED')
+        self.get_logger().error('=' * 60)
+        self.get_logger().error('Terminating program for safety...')
+        self.get_logger().error('')
+        self.get_logger().error('Please check:')
+        self.get_logger().error('  1. VESC is powered on')
+        self.get_logger().error('  2. USB cable is properly connected')
+        self.get_logger().error('  3. vesc_twist_node is running')
+        self.get_logger().error('  4. Device permissions (may need: sudo usermod -a -G dialout $USER)')
+        self.get_logger().error('')
+        
+        # Stop the vehicle immediately
+        try:
+            self.publish_stop_command()
+            time.sleep(0.5)
+        except:
+            pass  # Ignore errors if node is already shutting down
+        
+        # Mark as failed - main loop will detect this and exit
+        self.vesc_connection_failed = True
+        
+        # Shutdown ROS2 to stop the spin loop
+        try:
+            rclpy.shutdown()
+        except:
+            pass  # Ignore errors if already shutting down
     
     def parse_ocr_text(self, text):
         """
@@ -395,6 +548,11 @@ class IntersectionOcrNode(Node):
     
     def control_loop(self):
         """Main control loop implementing state machine"""
+        # Check if VESC connection has failed
+        if self.vesc_connection_failed:
+            # Don't execute any control commands if VESC is not connected
+            return
+        
         current_time = time.time()
         
         # State machine logic
@@ -541,9 +699,14 @@ def main(args=None):
     node = IntersectionOcrNode()
     
     try:
-        # Spin with timeout to check for stop command
-        while rclpy.ok() and not node.stop_command_received:
+        # Spin with timeout to check for stop command or VESC failure
+        while rclpy.ok() and not node.stop_command_received and not node.vesc_connection_failed:
             rclpy.spin_once(node, timeout_sec=0.1)
+        
+        # If VESC connection failed, exit immediately
+        if node.vesc_connection_failed:
+            node.get_logger().error('VESC connection failure detected in main loop. Exiting...')
+            sys.exit(1)
     except KeyboardInterrupt:
         node.get_logger().info('Keyboard interrupt - shutting down intersection OCR node...')
         node.publish_stop_command()
