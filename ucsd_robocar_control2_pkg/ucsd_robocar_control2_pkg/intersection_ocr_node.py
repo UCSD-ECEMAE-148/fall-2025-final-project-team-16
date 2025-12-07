@@ -71,6 +71,7 @@ class IntersectionOcrNode(Node):
         else:
             self.cmd_vel_pub = self.create_publisher(Twist, CMD_VEL_TOPIC_NAME, 10)
             self.cmd_vel_cmd = Twist()
+            self.get_logger().info(f'Created cmd_vel publisher on topic: {CMD_VEL_TOPIC_NAME}')
         
         # Image processing
         self.bridge = CvBridge()
@@ -152,6 +153,11 @@ class IntersectionOcrNode(Node):
         # Control timer
         self.control_timer = self.create_timer(0.05, self.control_loop)  # 20 Hz
         
+        # Debug counters
+        self._cmd_log_counter = 0
+        self._centroid_log_counter = 0
+        self._stop_log_counter = 0
+        
         self.get_logger().info(
             f'Intersection OCR Node initialized.\n'
             f'State: {self.current_state}\n'
@@ -173,6 +179,13 @@ class IntersectionOcrNode(Node):
         """Receive centroid error from lane detection"""
         self.latest_centroid_error = msg.data
         self.centroid_received = True
+        # Log periodically to confirm we're receiving centroid
+        if hasattr(self, '_centroid_log_counter'):
+            self._centroid_log_counter += 1
+        else:
+            self._centroid_log_counter = 0
+        if self._centroid_log_counter % 50 == 0:  # Log every 50 messages
+            self.get_logger().info(f'Received centroid: {msg.data:.3f}')
     
     def ocr_text_callback(self, msg: String):
         """Receive OCR text recognition results"""
@@ -211,9 +224,9 @@ class IntersectionOcrNode(Node):
         # Debouncing: require consecutive detections to avoid false positives
         if blue_ratio >= self.blue_detection_threshold:
             self.blue_tape_detection_count += 1
-            # Only log every 10th detection to avoid spam
-            if self.blue_tape_detection_count % 10 == 0:
-                self.get_logger().debug(f'Blue detected: ratio={blue_ratio:.3f}, count={self.blue_tape_detection_count}/{self.blue_detection_debounce_count}')
+            # Log every 5th detection to help with debugging
+            if self.blue_tape_detection_count % 5 == 0:
+                self.get_logger().info(f'Blue detected: ratio={blue_ratio:.3f}, count={self.blue_tape_detection_count}/{self.blue_detection_debounce_count} (threshold={self.blue_detection_threshold:.3f})')
             
             # Confirm detection only after N consecutive detections
             if self.blue_tape_detection_count >= self.blue_detection_debounce_count:
@@ -222,8 +235,17 @@ class IntersectionOcrNode(Node):
         else:
             # Reset count if detection fails
             if self.blue_tape_detection_count > 0:
-                self.get_logger().debug(f'Blue detection reset. Last ratio: {blue_ratio:.3f}')
+                self.get_logger().debug(f'Blue detection reset. Last ratio: {blue_ratio:.3f} (below threshold: {self.blue_detection_threshold:.3f})')
             self.blue_tape_detection_count = 0
+        
+        # Log blue ratio periodically for debugging (every 50 frames to avoid spam)
+        if hasattr(self, '_debug_frame_count'):
+            self._debug_frame_count += 1
+        else:
+            self._debug_frame_count = 0
+        
+        if self._debug_frame_count % 50 == 0 and blue_ratio > 0.01:  # Only log if there's some blue detected
+            self.get_logger().info(f'Blue ratio: {blue_ratio:.3f} (threshold: {self.blue_detection_threshold:.3f}) - {"ABOVE" if blue_ratio >= self.blue_detection_threshold else "BELOW"} threshold')
         
         return False
     
@@ -251,16 +273,16 @@ class IntersectionOcrNode(Node):
         text_lower = text.lower()
         
         # Keywords for stop command (check first, highest priority)
-        stop_keywords = ['stop', '停止', '停', 'halt', 'end', 'finish']
+        stop_keywords = ['STop', '停止', '停', 'halt', 'end', 'finish']
         for keyword in stop_keywords:
             if keyword in text_lower:
                 self.get_logger().info(f'Parsed OCR text "{text}" as STOP command')
                 return 'stop'
         
         # Keywords for left turn
-        left_keywords = ['左', 'left', 'l', 'turn left', '左转']
+        left_keywords = ['左', 'LEFT', 'l', 'turn left', '左转']
         # Keywords for right turn
-        right_keywords = ['右', 'right', 'r', 'turn right', '右转']
+        right_keywords = ['右', 'RIGHT', 'r', 'turn right', '右转']
         # Keywords for straight
         straight_keywords = ['直', 'straight', 's', 'go straight', '直行', 'forward']
         
@@ -385,9 +407,22 @@ class IntersectionOcrNode(Node):
                 # Continue lane following
                 if self.centroid_received:
                     self.publish_lane_following_command()
+                    # Log periodically for debugging
+                    if hasattr(self, '_cmd_log_counter'):
+                        self._cmd_log_counter += 1
+                    else:
+                        self._cmd_log_counter = 0
+                    if self._cmd_log_counter % 20 == 0:  # Log every 20 control loops (~1 second at 20Hz)
+                        self.get_logger().info(f'Lane following: speed={self.lane_following_speed:.3f}, steering={self.latest_centroid_error:.3f}, centroid_received={self.centroid_received}')
                 else:
                     # If no centroid received, stop for safety
                     self.publish_stop_command()
+                    if hasattr(self, '_stop_log_counter'):
+                        self._stop_log_counter += 1
+                    else:
+                        self._stop_log_counter = 0
+                    if self._stop_log_counter % 20 == 0:
+                        self.get_logger().warn(f'No centroid received - stopping vehicle. Waiting for lane detection...')
         
         elif self.current_state == self.STATE_APPROACHING_INTERSECTION:
             # Stop the vehicle
