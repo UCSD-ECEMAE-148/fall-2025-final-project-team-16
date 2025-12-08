@@ -3,8 +3,8 @@ all_components: 1
 simulator: 0
 
 # camera navigation
-camera_nav_calibration: 1
-camera_nav: 0
+camera_nav_calibration: 0
+camera_nav: 1
 
 # recording data 
 rosbag_launch: 0
