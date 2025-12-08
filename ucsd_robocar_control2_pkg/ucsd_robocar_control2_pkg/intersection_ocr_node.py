@@ -582,24 +582,35 @@ class IntersectionOcrNode(Node):
         
         # State machine logic
         if self.current_state == self.STATE_LANE_FOLLOWING:
-            # Check for intersection
+            """
+            Lane Following State:
+            - lane_detection_node: Detects yellow lane lines, publishes /centroid (error)
+            - lane_guidance_node: Uses PID control based on /centroid, publishes /cmd_vel
+            - intersection_ocr_node: Only monitors for blue tape, does NOT publish any commands
+            - Vehicle control is completely handled by lane_guidance_node
+            """
+            # Check for blue tape detection (intersection approaching)
             if self.detect_intersection():
+                # Blue tape detected - intersection_ocr_node takes control
                 self.current_state = self.STATE_APPROACHING_INTERSECTION
-                self.get_logger().info('Transitioning to APPROACHING_INTERSECTION')
+                self.get_logger().info(
+                    'Blue tape detected! Transitioning to APPROACHING_INTERSECTION. '
+                    'intersection_ocr_node taking control from lane_guidance_node'
+                )
             else:
-                # Continue lane following
-                if self.centroid_received:
-                    self.publish_lane_following_command()
-                    # Note: publish_lane_following_command now logs every publish
+                # No blue tape detected - continue normal lane following
+                # lane_detection_node and lane_guidance_node handle all vehicle control
+                # intersection_ocr_node does NOT publish any commands in this state
+                # Log periodically for debugging (every 100 control loops ~5 seconds at 20Hz)
+                if hasattr(self, '_monitor_log_counter'):
+                    self._monitor_log_counter += 1
                 else:
-                    # If no centroid received, stop for safety
-                    self.publish_stop_command()
-                    if hasattr(self, '_stop_log_counter'):
-                        self._stop_log_counter += 1
-                    else:
-                        self._stop_log_counter = 0
-                    if self._stop_log_counter % 20 == 0:
-                        self.get_logger().warn(f'[CONTROL] No centroid received - stopping vehicle. Waiting for lane detection...')
+                    self._monitor_log_counter = 0
+                if self._monitor_log_counter % 100 == 0:
+                    self.get_logger().debug(
+                        'STATE_LANE_FOLLOWING: Monitoring for blue tape. '
+                        'Vehicle control: lane_detection_node → lane_guidance_node → /cmd_vel'
+                    )
         
         elif self.current_state == self.STATE_APPROACHING_INTERSECTION:
             # Stop the vehicle

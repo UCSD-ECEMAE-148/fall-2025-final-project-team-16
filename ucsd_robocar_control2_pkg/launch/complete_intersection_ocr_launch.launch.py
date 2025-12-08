@@ -13,10 +13,15 @@ def generate_launch_description():
     
     This launch file includes:
     1. All hardware components from all_components.launch.py (camera, actuators, etc.)
-    2. Camera navigation calibration node (calibration_node)
-    3. Lane detection node
-    4. OCR client node
-    5. Intersection OCR decision node
+    2. Lane detection node (publishes /centroid)
+    3. Lane guidance node (PID control, publishes /cmd_vel for normal lane following)
+    4. OCR client node (communicates with external OCR server)
+    5. Intersection OCR decision node (monitors for blue tape, handles intersection logic)
+    
+    Control flow:
+    - Normal lane following: lane_guidance_node controls via /cmd_vel
+    - Blue tape detected: intersection_ocr_node takes control
+    - After intersection: returns control to lane_guidance_node
     """
     
     # Package names
@@ -76,6 +81,19 @@ def generate_launch_description():
         name='lane_detection_node'
     )
     ld.add_action(lane_detection_node)
+    
+    # 3.5. Lane guidance node - PID control for lane following
+    # This node publishes /cmd_vel based on /centroid error
+    # In STATE_LANE_FOLLOWING, intersection_ocr_node does NOT publish commands,
+    # allowing lane_guidance_node to control the vehicle
+    lane_guidance_node = Node(
+        package=lane_detection_package,
+        executable='lane_guidance_node',
+        output='screen',
+        parameters=[lane_detection_config],
+        name='lane_guidance_node'
+    )
+    ld.add_action(lane_guidance_node)
     
     # 4. OCR client node - communicates with external OCR server
     ocr_client_node = Node(
