@@ -11,6 +11,8 @@ import numpy as np
 import os
 import os.path
 import time
+import re
+import yaml
 
 # Nodes in this program
 CALIBRATION_NODE_NAME = 'calibration_node'
@@ -29,11 +31,13 @@ IMG_WINDOW_NAME = 'img'
 BW_WINDOW_NAME = 'blackAndWhiteImage'
 MASK_WINDOW_NAME = 'mask'
 THR_STR_WINDOW_NAME = 'throttle_and_steering'
+BLUE_TAPE_WINDOW_NAME = 'blue_tape_detection'
 
 cv2.namedWindow(IMG_WINDOW_NAME)
 cv2.namedWindow(BW_WINDOW_NAME)
 cv2.namedWindow(MASK_WINDOW_NAME)
 cv2.namedWindow(THR_STR_WINDOW_NAME)
+cv2.namedWindow(BLUE_TAPE_WINDOW_NAME)
 
 #
 def callback(x):
@@ -163,6 +167,25 @@ cv2.createTrackbar('throttle_polarity', THR_STR_WINDOW_NAME, throttle_polarity_n
 
 # Test motor control
 cv2.createTrackbar('test_motor_control', THR_STR_WINDOW_NAME, 0, 1, callback)
+
+# Blue tape detection trackbars
+blue_hue_low_default = 100
+blue_hue_high_default = 130
+blue_sat_low_default = 70
+blue_sat_high_default = 255
+blue_val_low_default = 50
+blue_val_high_default = 255
+blue_threshold_default = 8  # 0.08 * 100 for trackbar (0-100 range)
+blue_debounce_default = 6
+
+cv2.createTrackbar('blue_hue_low', BLUE_TAPE_WINDOW_NAME, blue_hue_low_default, 179, callback)
+cv2.createTrackbar('blue_hue_high', BLUE_TAPE_WINDOW_NAME, blue_hue_high_default, 179, callback)
+cv2.createTrackbar('blue_sat_low', BLUE_TAPE_WINDOW_NAME, blue_sat_low_default, 255, callback)
+cv2.createTrackbar('blue_sat_high', BLUE_TAPE_WINDOW_NAME, blue_sat_high_default, 255, callback)
+cv2.createTrackbar('blue_val_low', BLUE_TAPE_WINDOW_NAME, blue_val_low_default, 255, callback)
+cv2.createTrackbar('blue_val_high', BLUE_TAPE_WINDOW_NAME, blue_val_high_default, 255, callback)
+cv2.createTrackbar('blue_threshold', BLUE_TAPE_WINDOW_NAME, blue_threshold_default, 100, callback)
+cv2.createTrackbar('blue_debounce', BLUE_TAPE_WINDOW_NAME, blue_debounce_default, 20, callback)
 
 
 class Calibration(Node):
@@ -305,6 +328,35 @@ class Calibration(Node):
             cv2.setTrackbarPos('max_rpm', THR_STR_WINDOW_NAME, int(self.max_rpm))
             cv2.setTrackbarPos('steering_polarity', THR_STR_WINDOW_NAME, int(self.steering_polarity))
             cv2.setTrackbarPos('throttle_polarity', THR_STR_WINDOW_NAME, int(self.throttle_polarity))
+            
+            # Try to load blue tape parameters from intersection_ocr_config.yaml
+            intersection_config_path = str('/home/projects/ros2_ws/src/ucsd_robocar_hub2/ucsd_robocar_control2_pkg/config/intersection_ocr_config.yaml')
+            try:
+                with open(intersection_config_path, 'r') as f:
+                    intersection_config = yaml.safe_load(f)
+                    if 'intersection_ocr_node' in intersection_config and 'ros__parameters' in intersection_config['intersection_ocr_node']:
+                        params = intersection_config['intersection_ocr_node']['ros__parameters']
+                        blue_hue_low_default = params.get('blue_hue_low', 100)
+                        blue_hue_high_default = params.get('blue_hue_high', 130)
+                        blue_sat_low_default = params.get('blue_saturation_low', 70)
+                        blue_sat_high_default = params.get('blue_saturation_high', 255)
+                        blue_val_low_default = params.get('blue_value_low', 50)
+                        blue_val_high_default = params.get('blue_value_high', 255)
+                        blue_threshold_default = int(params.get('blue_detection_threshold', 0.08) * 100)
+                        blue_debounce_default = params.get('blue_detection_debounce_count', 6)
+                        
+                        cv2.setTrackbarPos('blue_hue_low', BLUE_TAPE_WINDOW_NAME, blue_hue_low_default)
+                        cv2.setTrackbarPos('blue_hue_high', BLUE_TAPE_WINDOW_NAME, blue_hue_high_default)
+                        cv2.setTrackbarPos('blue_sat_low', BLUE_TAPE_WINDOW_NAME, blue_sat_low_default)
+                        cv2.setTrackbarPos('blue_sat_high', BLUE_TAPE_WINDOW_NAME, blue_sat_high_default)
+                        cv2.setTrackbarPos('blue_val_low', BLUE_TAPE_WINDOW_NAME, blue_val_low_default)
+                        cv2.setTrackbarPos('blue_val_high', BLUE_TAPE_WINDOW_NAME, blue_val_high_default)
+                        cv2.setTrackbarPos('blue_threshold', BLUE_TAPE_WINDOW_NAME, blue_threshold_default)
+                        cv2.setTrackbarPos('blue_debounce', BLUE_TAPE_WINDOW_NAME, blue_debounce_default)
+                        self.get_logger().info(f'Loaded blue tape parameters from {intersection_config_path}')
+            except (FileNotFoundError, KeyError, TypeError) as e:
+                # Use defaults if file doesn't exist or parameters not found
+                self.get_logger().info(f'Using default blue tape parameters (file not found or invalid: {e})')
         except TypeError:
             pass
 
@@ -567,8 +619,81 @@ class Calibration(Node):
         cv2.imshow(IMG_WINDOW_NAME, img)
         cv2.imshow(MASK_WINDOW_NAME, mask)
         cv2.imshow(BW_WINDOW_NAME, blackAndWhiteImage)
+        
+        # Blue tape detection visualization
+        # Get blue tape trackbar values
+        blue_hue_low = cv2.getTrackbarPos('blue_hue_low', BLUE_TAPE_WINDOW_NAME)
+        blue_hue_high = cv2.getTrackbarPos('blue_hue_high', BLUE_TAPE_WINDOW_NAME)
+        blue_sat_low = cv2.getTrackbarPos('blue_sat_low', BLUE_TAPE_WINDOW_NAME)
+        blue_sat_high = cv2.getTrackbarPos('blue_sat_high', BLUE_TAPE_WINDOW_NAME)
+        blue_val_low = cv2.getTrackbarPos('blue_val_low', BLUE_TAPE_WINDOW_NAME)
+        blue_val_high = cv2.getTrackbarPos('blue_val_high', BLUE_TAPE_WINDOW_NAME)
+        blue_threshold_slider = cv2.getTrackbarPos('blue_threshold', BLUE_TAPE_WINDOW_NAME)
+        blue_debounce_save = cv2.getTrackbarPos('blue_debounce', BLUE_TAPE_WINDOW_NAME)
+        blue_threshold = float(blue_threshold_slider) / 100.0  # Convert from 0-100 to 0.0-1.0
+        
+        # Process full frame for blue tape detection (not cropped)
+        hsv_full = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        lower_blue = np.array([blue_hue_low, blue_sat_low, blue_val_low])
+        upper_blue = np.array([blue_hue_high, blue_sat_high, blue_val_high])
+        blue_mask = cv2.inRange(hsv_full, lower_blue, upper_blue)
+        
+        # Focus on lower portion of image (where blue tape typically appears)
+        height_full, width_full = blue_mask.shape
+        roi_bottom = blue_mask[int(height_full * 0.5):, :]  # Check bottom 50% of image
+        
+        # Calculate the fraction of blue pixels in the ROI
+        total_pixels = roi_bottom.shape[0] * roi_bottom.shape[1]
+        blue_pixels = np.count_nonzero(roi_bottom)
+        blue_ratio = blue_pixels / total_pixels if total_pixels > 0 else 0.0
+        
+        # Create visualization image
+        blue_detection_img = frame.copy()
+        # Draw ROI rectangle
+        cv2.rectangle(blue_detection_img, (0, int(height_full * 0.5)), (width_full, height_full), (255, 255, 0), 2)
+        
+        # Overlay blue mask on original image with transparency
+        blue_overlay = np.zeros_like(blue_detection_img, dtype=np.uint8)
+        blue_overlay[blue_mask > 0] = [255, 0, 0]  # Blue color for overlay
+        blue_detection_img = cv2.addWeighted(blue_detection_img, 1.0, blue_overlay, 0.5, 0)
+        
+        # Add text showing detection status
+        detection_status = "DETECTED" if blue_ratio >= blue_threshold else "NOT DETECTED"
+        color = (0, 255, 0) if blue_ratio >= blue_threshold else (0, 0, 255)
+        cv2.putText(blue_detection_img, f"Status: {detection_status}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        cv2.putText(blue_detection_img, f"Blue Ratio: {blue_ratio:.3f} (Threshold: {blue_threshold:.3f})", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        cv2.putText(blue_detection_img, f"HSV: H[{blue_hue_low}-{blue_hue_high}] S[{blue_sat_low}-{blue_sat_high}] V[{blue_val_low}-{blue_val_high}]", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(blue_detection_img, f"Pixels: {blue_pixels}/{total_pixels}", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(blue_detection_img, f"Debounce: {blue_debounce_save}", (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(blue_detection_img, "Press 's' to save parameters", (10, height_full - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+        
+        # Draw a progress bar for blue ratio
+        bar_width = 200
+        bar_height = 20
+        bar_x = width_full - bar_width - 10
+        bar_y = 30
+        cv2.rectangle(blue_detection_img, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (100, 100, 100), -1)  # Grey background
+        
+        threshold_pos = int(bar_x + blue_threshold * bar_width)
+        cv2.line(blue_detection_img, (threshold_pos, bar_y), (threshold_pos, bar_y + bar_height), (0, 255, 255), 2)  # Yellow threshold line
+        
+        current_ratio_pos = int(bar_x + blue_ratio * bar_width)
+        cv2.rectangle(blue_detection_img, (bar_x, bar_y), (current_ratio_pos, bar_y + bar_height), color, -1)  # Green/Red fill
+        
+        cv2.imshow(BLUE_TAPE_WINDOW_NAME, blue_detection_img)
+        cv2.imshow('blue_mask', blue_mask)  # Separate mask window
         cv2.waitKey(1)
 
+        # Get blue tape parameters for saving
+        blue_hue_low_save = cv2.getTrackbarPos('blue_hue_low', BLUE_TAPE_WINDOW_NAME)
+        blue_hue_high_save = cv2.getTrackbarPos('blue_hue_high', BLUE_TAPE_WINDOW_NAME)
+        blue_sat_low_save = cv2.getTrackbarPos('blue_sat_low', BLUE_TAPE_WINDOW_NAME)
+        blue_sat_high_save = cv2.getTrackbarPos('blue_sat_high', BLUE_TAPE_WINDOW_NAME)
+        blue_val_low_save = cv2.getTrackbarPos('blue_val_low', BLUE_TAPE_WINDOW_NAME)
+        blue_val_high_save = cv2.getTrackbarPos('blue_val_high', BLUE_TAPE_WINDOW_NAME)
+        blue_threshold_save = float(cv2.getTrackbarPos('blue_threshold', BLUE_TAPE_WINDOW_NAME)) / 100.0
+        blue_debounce_save = cv2.getTrackbarPos('blue_debounce', BLUE_TAPE_WINDOW_NAME)
+        
         # Write files to yaml file for storage. TODO write individual yaml files for each node
         color_config_path = str('/home/projects/ros2_ws/src/ucsd_robocar_hub2/ucsd_robocar_lane_detection2_pkg/config/ros_racer_calibration.yaml')
         f = open(color_config_path, "w")
@@ -649,6 +774,58 @@ class Calibration(Node):
             f"    max_left_steering : {self.max_left_steering} \n"
         )
         f.close()
+        
+        # Also save blue tape parameters to intersection_ocr_config.yaml
+        intersection_config_path = str('/home/projects/ros2_ws/src/ucsd_robocar_hub2/ucsd_robocar_control2_pkg/config/intersection_ocr_config.yaml')
+        try:
+            # Read existing file to preserve other parameters
+            with open(intersection_config_path, 'r') as existing_file:
+                existing_content = existing_file.read()
+            
+            # Check if intersection_ocr_node section exists
+            if 'intersection_ocr_node:' in existing_content:
+                # Update blue tape parameters in the file
+                import re
+                # Replace blue tape parameters
+                patterns = [
+                    (r'blue_hue_low:\s*\d+', f'blue_hue_low: {blue_hue_low_save}'),
+                    (r'blue_hue_high:\s*\d+', f'blue_hue_high: {blue_hue_high_save}'),
+                    (r'blue_saturation_low:\s*\d+', f'blue_saturation_low: {blue_sat_low_save}'),
+                    (r'blue_saturation_high:\s*\d+', f'blue_saturation_high: {blue_sat_high_save}'),
+                    (r'blue_value_low:\s*\d+', f'blue_value_low: {blue_val_low_save}'),
+                    (r'blue_value_high:\s*\d+', f'blue_value_high: {blue_val_high_save}'),
+                    (r'blue_detection_threshold:\s*[\d.]+', f'blue_detection_threshold: {blue_threshold_save:.3f}'),
+                    (r'blue_detection_debounce_count:\s*\d+', f'blue_detection_debounce_count: {blue_debounce_save}'),
+                ]
+                
+                updated_content = existing_content
+                for pattern, replacement in patterns:
+                    updated_content = re.sub(pattern, replacement, updated_content)
+                
+                with open(intersection_config_path, 'w') as intersection_file:
+                    intersection_file.write(updated_content)
+                self.get_logger().info(f'Blue tape parameters saved to {intersection_config_path}')
+            else:
+                self.get_logger().warn(f'intersection_ocr_node section not found in {intersection_config_path}, skipping blue tape parameter save')
+        except FileNotFoundError:
+            self.get_logger().warn(f'File {intersection_config_path} not found, creating new file with blue tape parameters')
+            # Create new file with blue tape parameters
+            with open(intersection_config_path, 'w') as intersection_file:
+                intersection_file.write(
+                    f"intersection_ocr_node:\n"
+                    f"  ros__parameters:\n"
+                    f"    blue_tape_detection_enabled: true\n"
+                    f"    blue_hue_low: {blue_hue_low_save}\n"
+                    f"    blue_hue_high: {blue_hue_high_save}\n"
+                    f"    blue_saturation_low: {blue_sat_low_save}\n"
+                    f"    blue_saturation_high: {blue_sat_high_save}\n"
+                    f"    blue_value_low: {blue_val_low_save}\n"
+                    f"    blue_value_high: {blue_val_high_save}\n"
+                    f"    blue_detection_threshold: {blue_threshold_save:.3f}\n"
+                    f"    blue_detection_debounce_count: {blue_debounce_save}\n"
+                )
+        except Exception as e:
+            self.get_logger().error(f'Error saving blue tape parameters: {e}')
 
     def clamp(self, data, upper_bound, lower_bound=None):
             if lower_bound==None:
