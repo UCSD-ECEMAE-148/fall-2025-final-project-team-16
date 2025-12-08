@@ -55,11 +55,7 @@ class VescTwist(Node):
         self.min_rpm = int(self.min_throttle  * self.max_rpm)
 
         self.get_logger().info(
-            f'\nmax_rpm (original): {int(self.get_parameter("max_rpm").value)}'
-            f'\nmax_rpm (scaled by max_throttle): {self.max_rpm}'
-            f'\nmax_throttle: {self.max_throttle} (default: {self.default_max_throttle})'
-            f'\nmin_throttle: {self.min_throttle}'
-            f'\nzero_throttle: {self.zero_throttle}'
+            f'\nmax_rpm: {self.max_rpm}'
             f'\nsteering_polarity: {self.steering_polarity}'
             f'\nthrottle_polarity: {self.throttle_polarity}'
             f'\nmax_right_steering: {self.max_right_steering}'
@@ -74,22 +70,10 @@ class VescTwist(Node):
         steering_angle = float(self.steering_offset + self.remap(msg.angular.z))
         
         # RPM map from [-1,1] --> [-max_rpm,max_rpm]
-        # Note: self.max_rpm here is already scaled by max_throttle (see line 54)
         rpm = int(self.max_rpm * msg.linear.x)
-        final_rpm = int(self.throttle_polarity * rpm)
 
-        # Debug logging (every 10th message to avoid spam)
-        if not hasattr(self, '_debug_counter'):
-            self._debug_counter = 0
-        self._debug_counter += 1
-        if self._debug_counter % 10 == 0:
-            self.get_logger().info(
-                f'[vesc_twist_node] cmd_vel: linear.x={msg.linear.x:.4f}, angular.z={msg.angular.z:.3f} | '
-                f'rpm={rpm} (max_rpm={self.max_rpm}, calculated from linear.x * max_rpm) | '
-                f'final_rpm={final_rpm} | steering_angle={steering_angle:.3f}'
-            )
-        
-        self.vesc.send_rpm(final_rpm)
+        # self.get_logger().info(f'rpm: {rpm}, steering_angle: {steering_angle}')
+        self.vesc.send_rpm(int(self.throttle_polarity * rpm))
         self.vesc.send_servo_angle(float(self.steering_polarity * steering_angle))
 
     def remap(self, value):
