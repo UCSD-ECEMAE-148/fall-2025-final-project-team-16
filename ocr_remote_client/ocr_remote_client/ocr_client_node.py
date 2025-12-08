@@ -16,7 +16,7 @@ class OcrClientNode(Node):
 
         # 参数：Mac 上 OCR server 的 IP & 端口
         # 记得改成你自己的 Mac 局域网 IP，比如 192.168.1.23
-        self.declare_parameter('server_host', '192.168.1.67')
+        self.declare_parameter('server_host', '192.168.10.133')
         self.declare_parameter('server_port', 5001)
 
         self.server_host = self.get_parameter('server_host').get_parameter_value().string_value
