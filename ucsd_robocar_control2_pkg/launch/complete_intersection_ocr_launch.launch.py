@@ -55,16 +55,17 @@ def generate_launch_description():
     
     # 2. Include camera_nav_calibration.launch.py - this starts calibration_node
     # (GUI tool for calibrating lane detection parameters)
-    camera_nav_calibration_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                get_package_share_directory(lane_detection_package),
-                'launch',
-                'camera_nav_calibration.launch.py'
-            )
-        )
-    )
-    ld.add_action(camera_nav_calibration_launch)
+    # DISABLED: Commented out to avoid GUI calibration node
+    # camera_nav_calibration_launch = IncludeLaunchDescription(
+    #     PythonLaunchDescriptionSource(
+    #         os.path.join(
+    #             get_package_share_directory(lane_detection_package),
+    #             'launch',
+    #             'camera_nav_calibration.launch.py'
+    #         )
+    #     )
+    # )
+    # ld.add_action(camera_nav_calibration_launch)
     
     # 3. Lane detection node - publishes /centroid error for lane following
     lane_detection_node = Node(

@@ -471,6 +471,13 @@ class IntersectionOcrNode(Node):
             self.cmd_vel_cmd.linear.x = 0.0
             self.cmd_vel_cmd.angular.z = 0.0
             self.cmd_vel_pub.publish(self.cmd_vel_cmd)
+            # Only log stop commands periodically to avoid spam
+            if hasattr(self, '_stop_cmd_log_counter'):
+                self._stop_cmd_log_counter += 1
+            else:
+                self._stop_cmd_log_counter = 0
+            if self._stop_cmd_log_counter % 50 == 0:  # Log every 2.5 seconds
+                self.get_logger().info(f'[CMD] Published STOP: linear.x=0.0, angular.z=0.0')
     
     def publish_lane_following_command(self):
         """Publish lane following command based on centroid error"""
@@ -486,10 +493,14 @@ class IntersectionOcrNode(Node):
             self.drive_cmd.drive.speed = self.lane_following_speed
             self.drive_cmd.drive.steering_angle = steering
             self.drive_pub.publish(self.drive_cmd)
+            # Debug log
+            self.get_logger().info(f'[CMD] Published Ackermann: speed={self.lane_following_speed:.3f}, steering={steering:.3f}')
         else:
             self.cmd_vel_cmd.linear.x = self.lane_following_speed
             self.cmd_vel_cmd.angular.z = steering
             self.cmd_vel_pub.publish(self.cmd_vel_cmd)
+            # Debug log - log every time to see what's being published
+            self.get_logger().info(f'[CMD] Published cmd_vel: linear.x={self.cmd_vel_cmd.linear.x:.3f}, angular.z={self.cmd_vel_cmd.angular.z:.3f}, centroid_error={self.latest_centroid_error:.3f}')
     
     def publish_turn_command(self, direction):
         """Publish turn command based on direction"""
@@ -551,9 +562,23 @@ class IntersectionOcrNode(Node):
         # Check if VESC connection has failed
         if self.vesc_connection_failed:
             # Don't execute any control commands if VESC is not connected
+            if hasattr(self, '_vesc_fail_log_counter'):
+                self._vesc_fail_log_counter += 1
+            else:
+                self._vesc_fail_log_counter = 0
+            if self._vesc_fail_log_counter % 100 == 0:  # Log every 5 seconds
+                self.get_logger().error('[CONTROL] VESC connection failed - not publishing commands')
             return
         
         current_time = time.time()
+        
+        # Debug: Log state and centroid status periodically
+        if hasattr(self, '_state_log_counter'):
+            self._state_log_counter += 1
+        else:
+            self._state_log_counter = 0
+        if self._state_log_counter % 100 == 0:  # Log every 5 seconds
+            self.get_logger().info(f'[CONTROL] State={self.current_state}, centroid_received={self.centroid_received}, centroid_error={self.latest_centroid_error:.3f}, vesc_failed={self.vesc_connection_failed}')
         
         # State machine logic
         if self.current_state == self.STATE_LANE_FOLLOWING:
@@ -565,13 +590,7 @@ class IntersectionOcrNode(Node):
                 # Continue lane following
                 if self.centroid_received:
                     self.publish_lane_following_command()
-                    # Log periodically for debugging
-                    if hasattr(self, '_cmd_log_counter'):
-                        self._cmd_log_counter += 1
-                    else:
-                        self._cmd_log_counter = 0
-                    if self._cmd_log_counter % 20 == 0:  # Log every 20 control loops (~1 second at 20Hz)
-                        self.get_logger().info(f'Lane following: speed={self.lane_following_speed:.3f}, steering={self.latest_centroid_error:.3f}, centroid_received={self.centroid_received}')
+                    # Note: publish_lane_following_command now logs every publish
                 else:
                     # If no centroid received, stop for safety
                     self.publish_stop_command()
@@ -580,7 +599,7 @@ class IntersectionOcrNode(Node):
                     else:
                         self._stop_log_counter = 0
                     if self._stop_log_counter % 20 == 0:
-                        self.get_logger().warn(f'No centroid received - stopping vehicle. Waiting for lane detection...')
+                        self.get_logger().warn(f'[CONTROL] No centroid received - stopping vehicle. Waiting for lane detection...')
         
         elif self.current_state == self.STATE_APPROACHING_INTERSECTION:
             # Stop the vehicle
