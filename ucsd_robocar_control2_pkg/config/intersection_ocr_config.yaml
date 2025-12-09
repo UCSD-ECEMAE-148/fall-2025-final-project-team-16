@@ -12,7 +12,7 @@ intersection_ocr_node:
     blue_value_low: 50       # Value (brightness) lower bound (0-255)
     blue_value_high: 255
     blue_detection_threshold: 0.050  # minimum fraction of image that must be blue (0.0-1.0) - balanced at 8%
-    blue_detection_debounce_count: 6  # number of consecutive detections needed to confirm - balanced at 6
+    blue_detection_debounce_count: 3  # number of consecutive detections needed to confirm - balanced at 6
     
     # Intersection behavior
     stop_duration: 1.0  # seconds to wait after stopping before OCR processing

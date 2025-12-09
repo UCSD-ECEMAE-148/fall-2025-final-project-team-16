@@ -46,19 +46,19 @@ lane_guidance_node:
     Ki_steering : 0.0 
     Kd_steering : 0.1 
     zero_throttle  : 0.0 
-    max_throttle : 0.2 
-    min_throttle : 0.1 
+    max_throttle : 0.1 
+    min_throttle : 0.08 
     error_threshold : 0.1 
     max_right_steering : 1.0 
     max_left_steering : -1.0 
 vesc_twist_node: 
   ros__parameters: 
-    max_rpm : 20000
+    max_rpm : 20000 
     steering_polarity : 1 
     throttle_polarity : 1 
     zero_throttle  : 0.0 
-    max_throttle : 1.0
-    min_throttle : 1.0
+    max_throttle : 1.0 
+    min_throttle : 1.0 
     max_right_steering : 1.0 
     straight_steering : 0.0 
     max_left_steering : -1.0 
