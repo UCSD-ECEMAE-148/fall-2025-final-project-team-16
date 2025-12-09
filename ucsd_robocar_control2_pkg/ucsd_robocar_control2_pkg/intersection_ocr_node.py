@@ -25,6 +25,12 @@ import time
 import os
 import subprocess
 import sys
+import signal
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
 
 NODE_NAME = 'intersection_ocr_node'
 CAMERA_TOPIC_NAME = '/camera/color/image_raw'
@@ -91,8 +97,8 @@ class IntersectionOcrNode(Node):
         # OCR processing
         self.latest_ocr_text = ""
         self.ocr_text_received = False
-        self.ocr_processing_timeout = 5.0  # seconds
         self.ocr_start_time = None
+        # Note: OCR timeout removed - will wait indefinitely for OCR result
         
         # Intersection detection parameters (blue tape detection)
         self.declare_parameters(
@@ -425,6 +431,165 @@ class IntersectionOcrNode(Node):
         except:
             pass  # Ignore errors if already shutting down
     
+    def shutdown_all_nodes(self):
+        """
+        Shutdown all ROS2 nodes by sending SIGTERM to all ROS2 processes.
+        This is called when STOP command is received.
+        """
+        self.get_logger().info('Shutting down all ROS2 nodes...')
+        
+        if PSUTIL_AVAILABLE:
+            try:
+                killed_count = 0
+                current_pid = os.getpid()
+                
+                # Get all processes
+                for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                    try:
+                        proc_info = proc.info
+                        cmdline = proc_info.get('cmdline', [])
+                        if not cmdline:
+                            continue
+                        
+                        # Skip current process
+                        if proc_info['pid'] == current_pid:
+                            continue
+                        
+                        # Check if it's a ROS2 node process
+                        cmdline_str = ' '.join(cmdline).lower()
+                        is_ros2_node = (
+                            'ros2' in cmdline_str or
+                            'lane_detection_node' in cmdline_str or
+                            'lane_guidance_node' in cmdline_str or
+                            'ocr_client_node' in cmdline_str or
+                            'intersection_ocr_node' in cmdline_str or
+                            'vesc_twist_node' in cmdline_str or
+                            'oakd_publisher' in cmdline_str or
+                            'calibration_node' in cmdline_str
+                        )
+                        
+                        if is_ros2_node:
+                            try:
+                                self.get_logger().info(f'Terminating ROS2 node process: PID {proc_info["pid"]}, CMD: {" ".join(cmdline[:3])}')
+                                proc.terminate()  # Send SIGTERM
+                                killed_count += 1
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                                
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        continue
+                
+                # Wait a bit for processes to terminate gracefully
+                time.sleep(1.0)
+                
+                # Force kill any remaining ROS2 processes
+                for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                    try:
+                        proc_info = proc.info
+                        cmdline = proc_info.get('cmdline', [])
+                        if not cmdline or proc_info['pid'] == current_pid:
+                            continue
+                        
+                        cmdline_str = ' '.join(cmdline).lower()
+                        is_ros2_node = (
+                            'ros2' in cmdline_str or
+                            'lane_detection_node' in cmdline_str or
+                            'lane_guidance_node' in cmdline_str or
+                            'ocr_client_node' in cmdline_str or
+                            'intersection_ocr_node' in cmdline_str or
+                            'vesc_twist_node' in cmdline_str or
+                            'oakd_publisher' in cmdline_str or
+                            'calibration_node' in cmdline_str
+                        )
+                        
+                        if is_ros2_node:
+                            try:
+                                if proc.is_running():
+                                    self.get_logger().warn(f'Force killing ROS2 node process: PID {proc_info["pid"]}')
+                                    proc.kill()  # Send SIGKILL
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                                
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        continue
+                
+                self.get_logger().info(f'Shutdown complete. Terminated {killed_count} ROS2 node processes.')
+                
+            except Exception as e:
+                self.get_logger().error(f'Error shutting down nodes with psutil: {e}')
+                # Fallback to subprocess method
+                self.shutdown_all_nodes_subprocess()
+        else:
+            # psutil not available, use subprocess method
+            self.get_logger().warn('psutil not available, using subprocess method to shutdown nodes')
+            self.shutdown_all_nodes_subprocess()
+    
+    def shutdown_all_nodes_subprocess(self):
+        """
+        Alternative method to shutdown nodes using subprocess and ros2 commands.
+        This is a fallback if psutil is not available.
+        """
+        try:
+            # Try to kill the launch process (which will kill all child nodes)
+            # Find the launch process
+            launch_result = subprocess.run(
+                ['pgrep', '-f', 'ros2 launch'],
+                capture_output=True,
+                text=True,
+                timeout=2.0
+            )
+            
+            if launch_result.returncode == 0:
+                launch_pids = launch_result.stdout.strip().split('\n')
+                for pid in launch_pids:
+                    if pid.strip():
+                        try:
+                            os.kill(int(pid.strip()), signal.SIGTERM)
+                            self.get_logger().info(f'Sent SIGTERM to launch process: {pid}')
+                        except (OSError, ValueError) as e:
+                            self.get_logger().warn(f'Failed to kill launch process {pid}: {e}')
+            
+            # Also try to kill individual node processes
+            node_names = [
+                'lane_detection_node',
+                'lane_guidance_node',
+                'ocr_client_node',
+                'intersection_ocr_node',
+                'vesc_twist_node',
+                'oakd_publisher',
+                'calibration_node'
+            ]
+            
+            for node_name in node_names:
+                try:
+                    # Find process by node name
+                    node_result = subprocess.run(
+                        ['pgrep', '-f', node_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=2.0
+                    )
+                    if node_result.returncode == 0:
+                        pids = node_result.stdout.strip().split('\n')
+                        for pid in pids:
+                            if pid.strip():
+                                try:
+                                    os.kill(int(pid.strip()), signal.SIGTERM)
+                                    self.get_logger().info(f'Sent SIGTERM to node {node_name} (PID: {pid})')
+                                except (OSError, ValueError) as e:
+                                    self.get_logger().warn(f'Failed to kill node {node_name} (PID {pid}): {e}')
+                except subprocess.TimeoutExpired:
+                    pass
+                except Exception as e:
+                    self.get_logger().warn(f'Error shutting down node {node_name}: {e}')
+                    
+        except subprocess.TimeoutExpired:
+            self.get_logger().warn('Timeout while shutting down nodes')
+        except FileNotFoundError:
+            self.get_logger().error('pgrep command not found')
+        except Exception as e:
+            self.get_logger().error(f'Error in subprocess shutdown method: {e}')
+    
     def parse_ocr_text(self, text):
         """
         Parse OCR text to determine turn direction or stop command.
@@ -680,7 +845,7 @@ class IntersectionOcrNode(Node):
                 elapsed = current_time - self.stop_start_time
                 self.get_logger().info(
                     f'[STATE_STOPPED_AT_INTERSECTION] Vehicle stopped, waiting for OCR. '
-                    f'Elapsed: {elapsed:.1f}s, OCR timeout: {self.ocr_processing_timeout:.1f}s'
+                    f'Elapsed: {elapsed:.1f}s (waiting indefinitely until OCR result received)'
                 )
             
             # Check for OCR result
@@ -695,7 +860,7 @@ class IntersectionOcrNode(Node):
                         self.stop_command_timer = None
                     self.current_state = self.STATE_STOP_COMMAND
                     self.stop_command_start_time = current_time
-                    self.get_logger().warn('STOP command received! Shutting down system...')
+                    self.get_logger().warn('STOP command received! Shutting down all nodes...')
                 elif self.detected_turn_direction in ['left', 'right', 'straight']:
                     # Normal turn command - transition to turning
                     # Destroy high-frequency stop timer before turning
@@ -710,35 +875,18 @@ class IntersectionOcrNode(Node):
                         f'Transitioning to TURNING state'
                     )
                 else:
-                    # If parsing failed, wait a bit more or proceed with default
-                    if current_time - self.ocr_start_time > self.ocr_processing_timeout:
-                        self.get_logger().warn('OCR parsing failed, proceeding straight')
-                        # Destroy high-frequency stop timer before turning
-                        if self.stop_command_timer is not None:
-                            self.stop_command_timer.cancel()
-                            self.stop_command_timer = None
-                        self.detected_turn_direction = 'straight'
-                        self.current_state = self.STATE_TURNING
-                        self.turn_start_time = current_time
-            elif current_time - self.ocr_start_time > self.ocr_processing_timeout:
-                # Timeout - proceed straight
-                self.get_logger().warn('OCR timeout, proceeding straight')
-                # Destroy high-frequency stop timer before turning
-                if self.stop_command_timer is not None:
-                    self.stop_command_timer.cancel()
-                    self.stop_command_timer = None
-                self.detected_turn_direction = 'straight'
-                self.current_state = self.STATE_TURNING
-                self.turn_start_time = current_time
+                    # If parsing failed, reset OCR flag and continue waiting
+                    self.get_logger().warn(f'OCR parsing failed for text: "{self.latest_ocr_text}". Continuing to wait for valid OCR result...')
+                    self.ocr_text_received = False  # Reset flag to continue waiting
             else:
-                # Still waiting for OCR result - log periodically
+                # Still waiting for OCR result - log periodically (no timeout, wait indefinitely)
                 elapsed = current_time - self.ocr_start_time
                 if not hasattr(self, '_ocr_wait_log_counter'):
                     self._ocr_wait_log_counter = 0
                 self._ocr_wait_log_counter += 1
                 if self._ocr_wait_log_counter % 20 == 0:  # Log every 20 loops (~1 second at 20Hz)
                     self.get_logger().info(
-                        f'Waiting for OCR result... (elapsed: {elapsed:.1f}s, timeout: {self.ocr_processing_timeout:.1f}s)'
+                        f'Waiting for OCR result... (elapsed: {elapsed:.1f}s, waiting indefinitely)'
                     )
         
         elif self.current_state == self.STATE_TURNING:
@@ -801,9 +949,11 @@ class IntersectionOcrNode(Node):
             elapsed = current_time - self.stop_command_start_time
             if elapsed >= self.stop_command_duration:
                 # Shutdown after waiting period
-                self.get_logger().error('STOP command executed. Shutting down node...')
+                self.get_logger().error('STOP command executed. Shutting down all nodes...')
                 # Stop vehicle one more time
                 self.publish_stop_command()
+                # Shutdown all ROS2 nodes
+                self.shutdown_all_nodes()
                 # Signal shutdown
                 self.stop_command_received = True
                 # This will be handled in main() loop

@@ -19,7 +19,7 @@ intersection_ocr_node:
     
     # OCR processing
     ocr_confidence_threshold: 0.5
-    ocr_processing_timeout: 5.0  # seconds to wait for OCR result
+    # Note: OCR timeout removed - will wait indefinitely for OCR result
     
     # Turn parameters
     turn_angle_left: 1.0   # steering angle for left turn (radians for Ackermann, normalized for Twist)
