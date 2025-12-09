@@ -167,6 +167,9 @@ class IntersectionOcrNode(Node):
         # Control timer
         self.control_timer = self.create_timer(0.05, self.control_loop)  # 20 Hz
         
+        # High-frequency stop command timer (created when needed in STATE_STOPPED_AT_INTERSECTION)
+        self.stop_command_timer = None
+        
         # VESC connection check timer (if enabled)
         if self.vesc_check_enabled:
             self.vesc_check_timer = self.create_timer(self.vesc_check_interval, self.check_vesc_connection)
@@ -460,6 +463,28 @@ class IntersectionOcrNode(Node):
         self.get_logger().warn(f'Could not parse OCR text: "{text}"')
         return None
     
+    def force_stop_callback(self):
+        """
+        High-frequency callback to force stop command.
+        Only active in STATE_STOPPED_AT_INTERSECTION to override lane_guidance_node.
+        """
+        if self.current_state == self.STATE_STOPPED_AT_INTERSECTION:
+            # Publish stop command without logging (to avoid spam)
+            if self.use_ackermann:
+                self.drive_cmd.header.stamp = self.get_clock().now().to_msg()
+                self.drive_cmd.drive.speed = 0.0
+                self.drive_cmd.drive.steering_angle = 0.0
+                self.drive_pub.publish(self.drive_cmd)
+            else:
+                self.cmd_vel_cmd.linear.x = 0.0
+                self.cmd_vel_cmd.angular.z = 0.0
+                self.cmd_vel_pub.publish(self.cmd_vel_cmd)
+        else:
+            # If we're no longer in STOPPED_AT_INTERSECTION, cancel this timer
+            if self.stop_command_timer is not None:
+                self.stop_command_timer.cancel()
+                self.stop_command_timer = None
+    
     def publish_stop_command(self):
         """Publish stop command (zero velocity)"""
         if self.use_ackermann:
@@ -476,8 +501,13 @@ class IntersectionOcrNode(Node):
                 self._stop_cmd_log_counter += 1
             else:
                 self._stop_cmd_log_counter = 0
-            if self._stop_cmd_log_counter % 50 == 0:  # Log every 2.5 seconds
-                self.get_logger().info(f'[CMD] Published STOP: linear.x=0.0, angular.z=0.0')
+            # Log more frequently when in STOPPED_AT_INTERSECTION state
+            if self.current_state == self.STATE_STOPPED_AT_INTERSECTION:
+                if self._stop_cmd_log_counter % 10 == 0:  # Log every 0.5 seconds when stopped
+                    self.get_logger().info(f'[CMD] Published STOP: linear.x=0.0, angular.z=0.0 (STATE_STOPPED_AT_INTERSECTION)')
+            else:
+                if self._stop_cmd_log_counter % 50 == 0:  # Log every 2.5 seconds otherwise
+                    self.get_logger().info(f'[CMD] Published STOP: linear.x=0.0, angular.z=0.0')
     
     def publish_lane_following_command(self):
         """Publish lane following command based on centroid error"""
@@ -596,6 +626,10 @@ class IntersectionOcrNode(Node):
                 self.stop_start_time = current_time
                 self.ocr_start_time = current_time
                 self.ocr_text_received = False
+                # Create high-frequency stop command timer to override lane_guidance_node
+                if self.stop_command_timer is None:
+                    self.stop_command_timer = self.create_timer(0.02, self.force_stop_callback)  # 50 Hz
+                    self.get_logger().info('Created high-frequency stop command timer (50Hz)')
                 self.get_logger().info(
                     'Blue tape detected! Immediately stopping vehicle and starting OCR processing. '
                     'intersection_ocr_node taking control from lane_guidance_node'
@@ -623,7 +657,19 @@ class IntersectionOcrNode(Node):
             - Wait for OCR result before transitioning to turning
             """
             # Continuously publish stop command to keep vehicle stopped
+            # Publish at high frequency to override lane_guidance_node commands
             self.publish_stop_command()
+            
+            # Log state periodically to confirm we're in this state
+            if not hasattr(self, '_stopped_state_log_counter'):
+                self._stopped_state_log_counter = 0
+            self._stopped_state_log_counter += 1
+            if self._stopped_state_log_counter % 20 == 0:  # Log every 1 second
+                elapsed = current_time - self.stop_start_time
+                self.get_logger().info(
+                    f'[STATE_STOPPED_AT_INTERSECTION] Vehicle stopped, waiting for OCR. '
+                    f'Elapsed: {elapsed:.1f}s, OCR timeout: {self.ocr_processing_timeout:.1f}s'
+                )
             
             # Check for OCR result
             if self.ocr_text_received:
@@ -631,11 +677,20 @@ class IntersectionOcrNode(Node):
                 self.detected_turn_direction = self.parse_ocr_text(self.latest_ocr_text)
                 if self.detected_turn_direction == 'stop':
                     # Stop command received - transition to stop state
+                    # Destroy high-frequency stop timer
+                    if self.stop_command_timer is not None:
+                        self.stop_command_timer.cancel()
+                        self.stop_command_timer = None
                     self.current_state = self.STATE_STOP_COMMAND
                     self.stop_command_start_time = current_time
                     self.get_logger().warn('STOP command received! Shutting down system...')
                 elif self.detected_turn_direction in ['left', 'right', 'straight']:
                     # Normal turn command - transition to turning
+                    # Destroy high-frequency stop timer before turning
+                    if self.stop_command_timer is not None:
+                        self.stop_command_timer.cancel()
+                        self.stop_command_timer = None
+                        self.get_logger().info('Destroyed high-frequency stop command timer')
                     self.current_state = self.STATE_TURNING
                     self.turn_start_time = current_time
                     self.get_logger().info(
@@ -646,12 +701,20 @@ class IntersectionOcrNode(Node):
                     # If parsing failed, wait a bit more or proceed with default
                     if current_time - self.ocr_start_time > self.ocr_processing_timeout:
                         self.get_logger().warn('OCR parsing failed, proceeding straight')
+                        # Destroy high-frequency stop timer before turning
+                        if self.stop_command_timer is not None:
+                            self.stop_command_timer.cancel()
+                            self.stop_command_timer = None
                         self.detected_turn_direction = 'straight'
                         self.current_state = self.STATE_TURNING
                         self.turn_start_time = current_time
             elif current_time - self.ocr_start_time > self.ocr_processing_timeout:
                 # Timeout - proceed straight
                 self.get_logger().warn('OCR timeout, proceeding straight')
+                # Destroy high-frequency stop timer before turning
+                if self.stop_command_timer is not None:
+                    self.stop_command_timer.cancel()
+                    self.stop_command_timer = None
                 self.detected_turn_direction = 'straight'
                 self.current_state = self.STATE_TURNING
                 self.turn_start_time = current_time
