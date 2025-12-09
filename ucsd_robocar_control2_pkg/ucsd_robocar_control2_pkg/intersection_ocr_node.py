@@ -598,21 +598,23 @@ class IntersectionOcrNode(Node):
         if not text:
             return None
         
-        text_lower = text.lower()
+        text_lower = text.lower().strip()
         
         # Keywords for stop command (check first, highest priority)
-        stop_keywords = ['STop', '停止', '停', 'halt', 'end', 'finish']
+        # Must check stop FIRST before other keywords to avoid false matches
+        stop_keywords = ['stop', '停止', '停', 'halt', 'end', 'finish']
         for keyword in stop_keywords:
+            # Check if keyword appears in text (case-insensitive)
             if keyword in text_lower:
                 self.get_logger().info(f'Parsed OCR text "{text}" as STOP command')
                 return 'stop'
         
         # Keywords for left turn
-        left_keywords = ['左', 'LEFT', 'l', 'turn left', '左转']
+        left_keywords = ['左', 'left', 'turn left', '左转']
         # Keywords for right turn
-        right_keywords = ['右', 'RIGHT', 'r', 'turn right', '右转']
-        # Keywords for straight
-        straight_keywords = ['直', 'straight', 's', 'go straight', '直行', 'forward']
+        right_keywords = ['右', 'right', 'turn right', '右转']
+        # Keywords for straight (removed 's' to avoid matching 'stop' - 's' in 'stop' would cause false positive)
+        straight_keywords = ['直', 'straight', 'go straight', '直行', 'forward']
         
         # Check for left turn
         for keyword in left_keywords:
@@ -626,7 +628,7 @@ class IntersectionOcrNode(Node):
                 self.get_logger().info(f'Parsed OCR text "{text}" as RIGHT turn')
                 return 'right'
         
-        # Check for straight
+        # Check for straight (only after stop is checked)
         for keyword in straight_keywords:
             if keyword in text_lower:
                 self.get_logger().info(f'Parsed OCR text "{text}" as STRAIGHT')
