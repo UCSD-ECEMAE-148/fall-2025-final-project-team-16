@@ -591,10 +591,13 @@ class IntersectionOcrNode(Node):
             """
             # Check for blue tape detection (intersection approaching)
             if self.detect_intersection():
-                # Blue tape detected - intersection_ocr_node takes control
-                self.current_state = self.STATE_APPROACHING_INTERSECTION
+                # Blue tape detected - immediately stop and start OCR processing
+                self.current_state = self.STATE_STOPPED_AT_INTERSECTION
+                self.stop_start_time = current_time
+                self.ocr_start_time = current_time
+                self.ocr_text_received = False
                 self.get_logger().info(
-                    'Blue tape detected! Transitioning to APPROACHING_INTERSECTION. '
+                    'Blue tape detected! Immediately stopping vehicle and starting OCR processing. '
                     'intersection_ocr_node taking control from lane_guidance_node'
                 )
             else:
@@ -612,25 +615,17 @@ class IntersectionOcrNode(Node):
                         'Vehicle control: lane_detection_node → lane_guidance_node → /cmd_vel'
                     )
         
-        elif self.current_state == self.STATE_APPROACHING_INTERSECTION:
-            # Stop the vehicle
-            self.publish_stop_command()
-            self.current_state = self.STATE_STOPPED_AT_INTERSECTION
-            self.stop_start_time = current_time
-            self.get_logger().info('Transitioning to STOPPED_AT_INTERSECTION')
-        
         elif self.current_state == self.STATE_STOPPED_AT_INTERSECTION:
-            # Wait for stop duration
-            if current_time - self.stop_start_time >= self.stop_duration:
-                self.current_state = self.STATE_OCR_PROCESSING
-                self.ocr_start_time = current_time
-                self.ocr_text_received = False
-                self.get_logger().info('Transitioning to OCR_PROCESSING - waiting for OCR result')
-            else:
-                self.publish_stop_command()
-        
-        elif self.current_state == self.STATE_OCR_PROCESSING:
-            # Wait for OCR result or timeout
+            """
+            Stopped at Intersection State:
+            - Vehicle is stopped (publishing stop commands continuously)
+            - OCR processing is active (ocr_client_node is running and processing images)
+            - Wait for OCR result before transitioning to turning
+            """
+            # Continuously publish stop command to keep vehicle stopped
+            self.publish_stop_command()
+            
+            # Check for OCR result
             if self.ocr_text_received:
                 # Parse OCR text
                 self.detected_turn_direction = self.parse_ocr_text(self.latest_ocr_text)
@@ -640,10 +635,13 @@ class IntersectionOcrNode(Node):
                     self.stop_command_start_time = current_time
                     self.get_logger().warn('STOP command received! Shutting down system...')
                 elif self.detected_turn_direction in ['left', 'right', 'straight']:
-                    # Normal turn command
+                    # Normal turn command - transition to turning
                     self.current_state = self.STATE_TURNING
                     self.turn_start_time = current_time
-                    self.get_logger().info(f'Transitioning to TURNING - direction: {self.detected_turn_direction}')
+                    self.get_logger().info(
+                        f'OCR result received: {self.detected_turn_direction}. '
+                        f'Transitioning to TURNING state'
+                    )
                 else:
                     # If parsing failed, wait a bit more or proceed with default
                     if current_time - self.ocr_start_time > self.ocr_processing_timeout:
@@ -657,9 +655,16 @@ class IntersectionOcrNode(Node):
                 self.detected_turn_direction = 'straight'
                 self.current_state = self.STATE_TURNING
                 self.turn_start_time = current_time
-            
-            # Keep stopped while processing
-            self.publish_stop_command()
+            else:
+                # Still waiting for OCR result - log periodically
+                elapsed = current_time - self.ocr_start_time
+                if not hasattr(self, '_ocr_wait_log_counter'):
+                    self._ocr_wait_log_counter = 0
+                self._ocr_wait_log_counter += 1
+                if self._ocr_wait_log_counter % 20 == 0:  # Log every 20 loops (~1 second at 20Hz)
+                    self.get_logger().info(
+                        f'Waiting for OCR result... (elapsed: {elapsed:.1f}s, timeout: {self.ocr_processing_timeout:.1f}s)'
+                    )
         
         elif self.current_state == self.STATE_TURNING:
             # Execute turn with improved lane detection feedback
