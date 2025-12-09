@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
-from std_msgs.msg import Float32, Int32, Int32MultiArray
+from std_msgs.msg import Float32, Int32, Int32MultiArray, Bool
 import cv2
 from cv_bridge import CvBridge
 import numpy as np
@@ -13,6 +13,7 @@ NODE_NAME = 'lane_detection_node'
 # Topics subcribed/published to in this program
 CAMERA_TOPIC_NAME = '/camera/color/image_raw'
 CENTROID_TOPIC_NAME = '/centroid'
+CONTROL_TOPIC_NAME = '/lane_detection_control'  # Control topic to enable/disable detection
 
 
 class LaneDetection(Node):
@@ -23,7 +24,13 @@ class LaneDetection(Node):
         self.centroid_error = Float32()
         self.camera_subscriber = self.create_subscription(Image, CAMERA_TOPIC_NAME, self.locate_centroid, 10)
         self.camera_subscriber
+        # Control subscriber to enable/disable lane detection
+        self.control_subscriber = self.create_subscription(Bool, CONTROL_TOPIC_NAME, self.control_callback, 10)
+        self.control_subscriber
         self.bridge = CvBridge()
+        
+        # Control flag: True = enabled (publish centroid), False = disabled (stop publishing)
+        self.detection_enabled = True
         self.max_num_lines_detected = 10
         self.image_width = 0
         self.image_height = 0
@@ -100,9 +107,21 @@ class LaneDetection(Node):
             f'\nrows_offset_decimal: {self.rows_offset_decimal}'
             f'\ncamera_centerline: {self.camera_centerline}'
             f'\ndebug_cv: {self.debug_cv}')
-
+    
+    def control_callback(self, msg: Bool):
+        """Callback for control messages to enable/disable lane detection"""
+        self.detection_enabled = msg.data
+        if self.detection_enabled:
+            self.get_logger().info('Lane detection ENABLED - will publish /centroid')
+        else:
+            self.get_logger().info('Lane detection DISABLED - will NOT publish /centroid')
 
     def locate_centroid(self, data):
+        # Check if detection is enabled
+        if not self.detection_enabled:
+            # Detection is disabled - do not process or publish
+            return
+        
         # Image processing from rosparams
         frame = self.bridge.imgmsg_to_cv2(data)
         if not self.camera_init:

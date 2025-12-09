@@ -14,7 +14,7 @@ and turn decision making. It:
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
-from std_msgs.msg import String, Float32
+from std_msgs.msg import String, Float32, Bool
 from geometry_msgs.msg import Twist
 from ackermann_msgs.msg import AckermannDriveStamped
 from cv_bridge import CvBridge
@@ -32,6 +32,7 @@ CENTROID_TOPIC_NAME = '/centroid'
 OCR_TEXT_TOPIC_NAME = '/ocr_text'
 CMD_VEL_TOPIC_NAME = '/cmd_vel'
 DRIVE_TOPIC_NAME = '/drive'
+LANE_DETECTION_CONTROL_TOPIC_NAME = '/lane_detection_control'  # Control topic to enable/disable lane_detection_node
 
 
 class IntersectionOcrNode(Node):
@@ -75,6 +76,12 @@ class IntersectionOcrNode(Node):
             self.cmd_vel_pub = self.create_publisher(Twist, CMD_VEL_TOPIC_NAME, 10)
             self.cmd_vel_cmd = Twist()
             self.get_logger().info(f'Created cmd_vel publisher on topic: {CMD_VEL_TOPIC_NAME}')
+        
+        # Publisher to control lane_detection_node (enable/disable)
+        self.lane_detection_control_pub = self.create_publisher(Bool, LANE_DETECTION_CONTROL_TOPIC_NAME, 10)
+        self.lane_detection_control_msg = Bool()
+        self.lane_detection_control_msg.data = True  # Default: enabled
+        self.get_logger().info(f'Created lane_detection_control publisher on topic: {LANE_DETECTION_CONTROL_TOPIC_NAME}')
         
         # Image processing
         self.bridge = CvBridge()
@@ -622,6 +629,11 @@ class IntersectionOcrNode(Node):
             # Check for blue tape detection (intersection approaching)
             if self.detect_intersection():
                 # Blue tape detected - immediately stop and start OCR processing
+                # Stop lane_detection_node to prevent it from publishing /centroid
+                self.lane_detection_control_msg.data = False
+                self.lane_detection_control_pub.publish(self.lane_detection_control_msg)
+                self.get_logger().info('Stopping lane_detection_node - disabling /centroid publishing')
+                
                 self.current_state = self.STATE_STOPPED_AT_INTERSECTION
                 self.stop_start_time = current_time
                 self.ocr_start_time = current_time
@@ -772,6 +784,11 @@ class IntersectionOcrNode(Node):
         
         elif self.current_state == self.STATE_TURN_COMPLETE:
             # Resume lane following
+            # Re-enable lane_detection_node to resume publishing /centroid
+            self.lane_detection_control_msg.data = True
+            self.lane_detection_control_pub.publish(self.lane_detection_control_msg)
+            self.get_logger().info('Re-enabled lane_detection_node - resuming /centroid publishing')
+            
             self.current_state = self.STATE_LANE_FOLLOWING
             self.detected_turn_direction = None
             self.turn_lane_detected = False
