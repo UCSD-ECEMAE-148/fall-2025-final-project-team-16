@@ -116,8 +116,8 @@ class IntersectionOcrNode(Node):
                 ('intersection_distance_threshold', 2.0),  # meters (if using odometry)
                 ('stop_duration', 1.0),  # seconds to wait after stopping
                 ('ocr_confidence_threshold', 0.5),
-                ('turn_angle_left', 1.0),  # steering angle for left turn
-                ('turn_angle_right', -1.0),  # steering angle for right turn
+                ('turn_angle_left', -1.0),  # steering angle for left turn (negative for left, positive for right)
+                ('turn_angle_right', 1.0),  # steering angle for right turn
                 ('turn_duration', 3.0),  # seconds to execute turn
                 ('turn_speed', 0.15),  # speed during turn
                 ('lane_following_speed', 0.2),  # normal lane following speed
