@@ -24,7 +24,7 @@ intersection_ocr_node:
     # Turn parameters
     turn_angle_left: -1.0   # steering angle for left turn (negative for left, positive for right in Twist/cmd_vel)
     turn_angle_right: 1.0  # steering angle for right turn
-    turn_duration: 3.0  # seconds to execute turn
+    turn_duration: 1.0  # seconds to execute turn
     turn_speed: 0.15  # speed during turn
     
     # Improved turning with lane detection

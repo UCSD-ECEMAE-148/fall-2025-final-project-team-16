@@ -118,7 +118,7 @@ class IntersectionOcrNode(Node):
                 ('ocr_confidence_threshold', 0.5),
                 ('turn_angle_left', -1.0),  # steering angle for left turn (negative for left, positive for right)
                 ('turn_angle_right', 1.0),  # steering angle for right turn
-                ('turn_duration', 3.0),  # seconds to execute turn
+                ('turn_duration', 1.0),  # seconds to execute turn
                 ('turn_speed', 0.15),  # speed during turn
                 ('lane_following_speed', 0.2),  # normal lane following speed
                 ('turn_lane_detection_enabled', True),  # Use lane detection to verify turn completion
