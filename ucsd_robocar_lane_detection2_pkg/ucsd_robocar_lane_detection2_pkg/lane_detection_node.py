@@ -107,7 +107,7 @@ class LaneDetection(Node):
             f'\nrows_offset_decimal: {self.rows_offset_decimal}'
             f'\ncamera_centerline: {self.camera_centerline}'
             f'\ndebug_cv: {self.debug_cv}')
-    
+
     def control_callback(self, msg: Bool):
         """Callback for control messages to enable/disable lane detection"""
         self.detection_enabled = msg.data

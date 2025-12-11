@@ -693,7 +693,7 @@ class Calibration(Node):
         blue_val_high_save = cv2.getTrackbarPos('blue_val_high', BLUE_TAPE_WINDOW_NAME)
         blue_threshold_save = float(cv2.getTrackbarPos('blue_threshold', BLUE_TAPE_WINDOW_NAME)) / 100.0
         blue_debounce_save = cv2.getTrackbarPos('blue_debounce', BLUE_TAPE_WINDOW_NAME)
-        
+
         # Write files to yaml file for storage. TODO write individual yaml files for each node
         color_config_path = str('/home/projects/ros2_ws/src/ucsd_robocar_hub2/ucsd_robocar_lane_detection2_pkg/config/ros_racer_calibration.yaml')
         f = open(color_config_path, "w")
