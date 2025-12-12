@@ -1,4 +1,4 @@
-# UCSD Robocar Hub2 - Autonomous Vehicle System
+# OCR-Guided Treasure Hunter
 
 <img src="ucsd_ros2_logos.png" alt="UCSD ROS2 Logo">
 
