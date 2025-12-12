@@ -20,7 +20,7 @@
 
 ## Overview
 
-This is the **UCSD Robocar Hub2** metapackage, a comprehensive ROS2-based autonomous vehicle framework designed for autonomous navigation, lane following, and intersection handling. The system integrates multiple sensors, actuators, path planning algorithms, and control systems to enable fully autonomous operation.
+This is the **UCSD Team 16 OCR-Guided Treasure Hunter** metapackage, a comprehensive ROS2-based autonomous vehicle framework designed for autonomous navigation, lane following, and intersection handling. The system integrates multiple sensors, actuators, path planning algorithms, and control systems to enable fully autonomous operation.
 
 **Key Capabilities:**
 - Real-time lane detection and following using computer vision
