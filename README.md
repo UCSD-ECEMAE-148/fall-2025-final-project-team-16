@@ -218,7 +218,7 @@ The `intersection_ocr_node` implements a state machine with the following states
 ## Prerequisites
 
 ### Hardware Requirements
-- **Jetson Nano/Xavier** (or x86 system with Docker)
+- **Raspberry Pi** (or x86 system with Docker)
 - **OAK-D camera** (or compatible camera)
 - **VESC motor controller** (connected via USB `/dev/ttyACM0`)
 - **RC car chassis** with steering servo and motor
@@ -234,7 +234,7 @@ The `intersection_ocr_node` implements a state machine with the following states
 ### Docker (Recommended)
 The project provides Docker images for faster setup:
 - **Docker Image**: `djnighti/ucsd_robocar`
-- **Platforms**: Jetson (ARM64) and x86_64
+- **Platforms**: Raspberry Pi (ARM64) and x86_64
 
 ---
 
@@ -249,7 +249,7 @@ The project provides Docker images for faster setup:
 
 2. **Run the container:**
    ```bash
-   # For Jetson
+   # For Raspberry Pi
    ./docker_setup/bash_scripts/docker_ucsd_jetson.sh
    
    # For x86
