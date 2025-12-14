@@ -265,7 +265,7 @@ The project provides Docker images for faster setup:
 
 1. **Clone the repository:**
    ```bash
-   git clone <repository_url>
+   git clone https://github.com/UCSD-ECEMAE-148/fall-2025-final-project-team-16
    cd fall-2025-final-project-team-16
    ```
 
